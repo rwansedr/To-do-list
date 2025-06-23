@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient'
 
 export default function AuthForm() {
   return (
-    <div className="flex justify-center items-center h-full">
+    <div className="flex justify-center items-center h-screen">
       <Auth
         supabaseClient={supabase}
         appearance={{ theme: ThemeSupa }}
