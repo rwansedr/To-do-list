@@ -1,196 +1,170 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import { Session } from '@supabase/supabase-js'
 
 interface Todo {
   id: string
   text: string
   completed: boolean
   user_id: string
+  created_at: string
 }
 
-export default function TodoList({ session }: { session: Session }) {
+interface Props {
+  session: {
+    user: {
+      id: string
+    }
+  }
+}
+
+export default function TodoList({ session }: Props) {
   const [todos, setTodos] = useState<Todo[]>([])
   const [newTodo, setNewTodo] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingText, setEditingText] = useState('')
-  const userId = session.user.id
+  const [loading, setLoading] = useState(false)
 
-  // Fetch todos on load
   useEffect(() => {
-    const fetchTodos = async () => {
-      const { data, error } = await supabase
-        .from('todos')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      if (error) console.error('Error fetching todos:', error)
-      else setTodos(data as Todo[])
-    }
-
     fetchTodos()
-  }, [userId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Add todo to Supabase
+  const fetchTodos = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('todos')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching todos:', error.message)
+    } else if (data) {
+      setTodos(data as Todo[])
+    }
+    setLoading(false)
+  }
+
   const addTodo = async () => {
     if (!newTodo.trim()) return
+    setLoading(true)
 
     const { data, error } = await supabase
       .from('todos')
-      .insert([{ text: newTodo, completed: false, user_id: userId }])
+      .insert({ text: newTodo.trim(), completed: false, user_id: session.user.id })
       .select()
       .single()
 
     if (error) {
-      console.error('Error adding todo:', error)
-    } else {
-      setTodos([data as Todo, ...todos])
+      console.error('Error adding todo:', error.message)
+    } else if (data) {
+      setTodos(prev => [data as Todo, ...prev])
       setNewTodo('')
     }
+    setLoading(false)
   }
 
-  // Toggle complete
-  const toggleTodo = async (todo: Todo) => {
-    const { data, error } = await supabase
-      .from('todos')
-      .update({ completed: !todo.completed })
-      .eq('id', todo.id)
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Error toggling todo:', error)
-    } else {
-      setTodos(todos.map(t => (t.id === todo.id ? (data as Todo) : t)))
-    }
-  }
-
-  // Delete todo
-  const deleteTodo = async (id: string) => {
+  const toggleTodo = async (id: string, completed: boolean) => {
     const { error } = await supabase
       .from('todos')
-      .delete()
+      .update({ completed: !completed })
       .eq('id', id)
-      .eq('user_id', userId)
 
-    if (error) console.error('Error deleting todo:', error)
-    else setTodos(todos.filter(t => t.id !== id))
-  }
-
-  // Start editing
-  const startEditing = (todo: Todo) => {
-    setEditingId(todo.id)
-    setEditingText(todo.text)
-  }
-
-  // Save edit
-  const saveEdit = async (id: string) => {
-    const { data, error } = await supabase
-      .from('todos')
-      .update({ text: editingText })
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) console.error('Error saving edit:', error)
-    else {
-      setTodos(todos.map(t => (t.id === id ? (data as Todo) : t)))
-      setEditingId(null)
-      setEditingText('')
+    if (error) {
+      console.error('Error toggling todo:', error.message)
+    } else {
+      setTodos(prev =>
+        prev.map(todo => (todo.id === id ? { ...todo, completed: !completed } : todo))
+      )
     }
   }
 
-  return (
-    <div className="max-w-xl mx-auto mt-10 p-4 shadow-md rounded-xl bg-white">
-      <h1 className="text-2xl font-bold mb-4">📝 To-Do List</h1>
+  const deleteTodo = async (id: string) => {
+    const { error } = await supabase.from('todos').delete().eq('id', id)
 
-      <div className="flex mb-4">
+    if (error) {
+      console.error('Error deleting todo:', error.message)
+    } else {
+      setTodos(prev => prev.filter(todo => todo.id !== id))
+    }
+  }
+
+  const handleLogout = async () => {
+  const confirmed = window.confirm('Are you sure you want to logout?')
+  if (!confirmed) return
+
+  await supabase.auth.signOut()
+  location.reload()
+}
+
+  return (
+    <div className="max-w-xl mx-auto mt-10 p-6 shadow-md rounded-xl bg-white">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">📝 To-Do List</h1>
+        <button
+          onClick={handleLogout}
+          className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+        >
+          Logout
+        </button>
+      </div>
+
+      <div className="flex mb-6">
         <input
           type="text"
+          placeholder="Add a new task..."
           value={newTodo}
           onChange={e => setNewTodo(e.target.value)}
-          className="flex-1 p-2 border rounded-l"
-          placeholder="Add a new task..."
+          className="flex-1 p-3 border border-gray-300 rounded-l-md focus:outline-none"
+          onKeyDown={e => e.key === 'Enter' && addTodo()}
+          disabled={loading}
         />
         <button
           onClick={addTodo}
-          className="bg-blue-500 text-white px-4 rounded-r hover:bg-blue-600"
+          disabled={loading || !newTodo.trim()}
+          className={`px-6 rounded-r-md text-white ${
+            loading || !newTodo.trim()
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700'
+          }`}
         >
           Add
         </button>
       </div>
 
-      <ul>
-        {todos.map(todo => (
-          <li key={todo.id} className="flex justify-between items-center mb-2">
-            <div className="flex items-center flex-1 gap-2">
-              <input
-                type="checkbox"
-                checked={todo.completed}
-                onChange={() => toggleTodo(todo)}
-                className="w-5 h-5 cursor-pointer"
-              />
-              {editingId === todo.id ? (
+      {loading && todos.length === 0 ? (
+        <p className="text-center text-gray-500">Loading...</p>
+      ) : todos.length === 0 ? (
+        <p className="text-center text-gray-500">No tasks yet. Add one!</p>
+      ) : (
+        <ul className="space-y-3">
+          {todos.map(todo => (
+            <li
+              key={todo.id}
+              className="flex justify-between items-center p-3 border border-gray-200 rounded"
+            >
+              <label className="flex items-center gap-3 cursor-pointer select-none">
                 <input
-                  value={editingText}
-                  onChange={e => setEditingText(e.target.value)}
-                  className="p-1 border rounded w-full"
+                  type="checkbox"
+                  checked={todo.completed}
+                  onChange={() => toggleTodo(todo.id, todo.completed)}
+                  className="w-5 h-5 cursor-pointer"
                 />
-              ) : (
-                <span
-                  className={`${todo.completed ? 'line-through text-gray-500' : ''}`}
-                >
+                <span className={todo.completed ? 'line-through text-gray-500' : ''}>
                   {todo.text}
                 </span>
-              )}
-            </div>
-            <div className="ml-2 flex gap-2">
-              {editingId === todo.id ? (
-                <button
-                  onClick={() => saveEdit(todo.id)}
-                  className="text-green-500"
-                >
-                  💾
-                </button>
-              ) : (
-                <button
-                  onClick={() => startEditing(todo)}
-                  className="text-yellow-500"
-                >
-                  ✏️
-                </button>
-              )}
+              </label>
+
               <button
                 onClick={() => deleteTodo(todo.id)}
-                className="text-red-500 hover:text-red-700"
+                className="text-red-600 hover:text-red-800 font-bold text-xl leading-none"
+                aria-label="Delete task"
               >
-                ❌
+                &times;
               </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      {todos.some(t => t.completed) && (
-        <div className="mt-6">
-          <h2 className="text-lg font-semibold mb-2">
-            ✅ Completed Tasks (History)
-          </h2>
-          <ul className="text-sm text-gray-600">
-            {todos
-              .filter(todo => todo.completed)
-              .map(todo => (
-                <li key={todo.id} className="line-through">
-                  {todo.text}
-                </li>
-              ))}
-          </ul>
-        </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
